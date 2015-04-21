@@ -1,22 +1,14 @@
 /*
-SparkCore Verison of OneWire Libary
-
-I made monor tweeks to allow use in the web builder and created this repository for
-use in the contributed libs list.
-
-6/2014 - Hotaman 
-
-I've taken the code that Spark Forum user tidwelltimj posted 
-split it back into separte code and header files and put back in the 
-credits and comments and got it compiling on the command line within SparkCore core-firmware
-
-Justin Maynard 2013
-
-Original Comments follow
-
 Copyright (c) 2007, Jim Studt  (original old version - many contributors since)
 
-The latest version of this library may be found at:
+Slightly modified by josh on 6/22/2014 to add support for internal pull-up resistors. 
+ 
+More info at:
+
+  http://wp.josh.com/2014/06/21/no-external-pull-up-needed-for-ds18b20-temp-sensor
+
+Modifications based on the version of this library found at:
+
   http://www.pjrc.com/teensy/td_libs_OneWire.html
 
 OneWire has been maintained by Paul Stoffregen (paul@pjrc.com) since
@@ -128,70 +120,20 @@ sample code bearing this copyright.
 // Branding Policy.
 //--------------------------------------------------------------------------
 */
+
 #include "OneWire.h"
 
-OneWire::OneWire(uint16_t pin)
-{
-	pinMode(pin, INPUT_PULLUP);
-	 _pin = pin;
 
+OneWire::OneWire(uint8_t pin)
+{
+	pinMode(pin, INPUT);
+	bitmask = PIN_TO_BITMASK(pin);
+	baseReg = PIN_TO_BASEREG(pin);
+#if ONEWIRE_SEARCH
+	reset_search();
+#endif
 }
 
-void OneWire::DIRECT_WRITE_LOW(void)
-{
-PIN_MAP[_pin].gpio_peripheral->BRR = PIN_MAP[_pin].gpio_pin;
-}	
-void OneWire::DIRECT_MODE_OUTPUT(void)
-{
-GPIO_TypeDef *gpio_port = PIN_MAP[_pin].gpio_peripheral;
-    uint16_t gpio_pin = PIN_MAP[_pin].gpio_pin;
-
-        GPIO_InitTypeDef GPIO_InitStructure;
-
-        if (gpio_port == GPIOA )
-        {
-                RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
-        }
-        else if (gpio_port == GPIOB )
-        {
-                RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
-        }
-
-    GPIO_InitStructure.GPIO_Pin = gpio_pin;
-	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;
-	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    PIN_MAP[_pin].pin_mode = OUTPUT;
-    GPIO_Init(gpio_port, &GPIO_InitStructure);
-}
-void OneWire::DIRECT_WRITE_HIGH(void)
-{
-PIN_MAP[_pin].gpio_peripheral->BSRR = PIN_MAP[_pin].gpio_pin;
-}
-void OneWire::DIRECT_MODE_INPUT(void)
-{
-	GPIO_TypeDef *gpio_port = PIN_MAP[_pin].gpio_peripheral;
-    uint16_t gpio_pin = PIN_MAP[_pin].gpio_pin;
-
-        GPIO_InitTypeDef GPIO_InitStructure;
-
-        if (gpio_port == GPIOA )
-        {
-                RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
-        }
-        else if (gpio_port == GPIOB )
-        {
-                RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
-        }
-
-    GPIO_InitStructure.GPIO_Pin = gpio_pin;
-	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;
-    PIN_MAP[_pin].pin_mode = INPUT;
-GPIO_Init(gpio_port, &GPIO_InitStructure);
-}
-uint8_t OneWire::DIRECT_READ(void)
-{
-return GPIO_ReadInputDataBit(PIN_MAP[_pin].gpio_peripheral, PIN_MAP[_pin].gpio_pin);
-}
 
 // Perform the onewire reset function.  We will wait up to 250uS for
 // the bus to come high, if it doesn't then it is broken or shorted
@@ -199,52 +141,60 @@ return GPIO_ReadInputDataBit(PIN_MAP[_pin].gpio_peripheral, PIN_MAP[_pin].gpio_p
 //
 // Returns 1 if a device asserted a presence pulse, 0 otherwise.
 //
-
 uint8_t OneWire::reset(void)
 {
+	IO_REG_TYPE mask = bitmask;
+	volatile IO_REG_TYPE *reg IO_REG_ASM = baseReg;
 	uint8_t r;
 	uint8_t retries = 125;
 
 	noInterrupts();
-	DIRECT_MODE_INPUT();
+	DIRECT_MODE_INPUT(reg, mask);
 	interrupts();
 	// wait until the wire is high... just in case
 	do {
 		if (--retries == 0) return 0;
 		delayMicroseconds(2);
-	} while ( !DIRECT_READ());
+	} while ( !DIRECT_READ(reg, mask));
 
 	noInterrupts();
-	DIRECT_WRITE_LOW();
-	DIRECT_MODE_OUTPUT();	// drive output low
+	DIRECT_WRITE_LOW(reg, mask);
+	DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
 	interrupts();
 	delayMicroseconds(480);
 	noInterrupts();
-	DIRECT_MODE_INPUT();	// allow it to float
+	DIRECT_MODE_INPUT(reg, mask);	// allow it to float
+	DIRECT_WRITE_HIGH( reg , mask ); // enable pull-up resistor	
 	delayMicroseconds(70);
-	r = !DIRECT_READ();
+	r = !DIRECT_READ(reg, mask);
 	interrupts();
 	delayMicroseconds(410);
 	return r;
 }
+
+//
+// Write a bit. Port and bit is used to cut lookup time and provide
+// more certain timing.
+//
 void OneWire::write_bit(uint8_t v)
 {
-	
+	IO_REG_TYPE mask=bitmask;
+	volatile IO_REG_TYPE *reg IO_REG_ASM = baseReg;
 
 	if (v & 1) {
 		noInterrupts();
-		DIRECT_WRITE_LOW();
-		DIRECT_MODE_OUTPUT();	// drive output low
+		DIRECT_WRITE_LOW(reg, mask);
+		DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
 		delayMicroseconds(10);
-		DIRECT_WRITE_HIGH();	// drive output high
+		DIRECT_WRITE_HIGH(reg, mask);	// drive output high
 		interrupts();
 		delayMicroseconds(55);
 	} else {
 		noInterrupts();
-		DIRECT_WRITE_LOW();
-		DIRECT_MODE_OUTPUT();	// drive output low
+		DIRECT_WRITE_LOW(reg, mask);
+		DIRECT_MODE_OUTPUT(reg, mask);	// drive output low
 		delayMicroseconds(65);
-		DIRECT_WRITE_HIGH();	// drive output high
+		DIRECT_WRITE_HIGH(reg, mask);	// drive output high
 		interrupts();
 		delayMicroseconds(5);
 	}
@@ -256,16 +206,18 @@ void OneWire::write_bit(uint8_t v)
 //
 uint8_t OneWire::read_bit(void)
 {
-	
+	IO_REG_TYPE mask=bitmask;
+	volatile IO_REG_TYPE *reg IO_REG_ASM = baseReg;
 	uint8_t r;
 
 	noInterrupts();
-	DIRECT_MODE_OUTPUT();
-	DIRECT_WRITE_LOW();
+	DIRECT_MODE_OUTPUT(reg, mask);
+	DIRECT_WRITE_LOW(reg, mask);
 	delayMicroseconds(3);
-	DIRECT_MODE_INPUT();	// let pin float, pull up will raise
+	DIRECT_MODE_INPUT(reg, mask);	// let pin float, pull up will raise
+	DIRECT_WRITE_HIGH( reg , mask ); // enable pull-up resistor	
 	delayMicroseconds(10);
-	r = DIRECT_READ();
+	r = DIRECT_READ(reg, mask);
 	interrupts();
 	delayMicroseconds(53);
 	return r;
@@ -286,8 +238,7 @@ void OneWire::write(uint8_t v, uint8_t power /* = 0 */) {
     }
     if ( !power) {
 	noInterrupts();
-	DIRECT_MODE_INPUT();
-	DIRECT_WRITE_LOW();
+	DIRECT_MODE_INPUT(baseReg, bitmask);
 	interrupts();
     }
 }
@@ -297,8 +248,7 @@ void OneWire::write_bytes(const uint8_t *buf, uint16_t count, bool power /* = 0 
     write(buf[i]);
   if (!power) {
     noInterrupts();
-    DIRECT_MODE_INPUT();
-    DIRECT_WRITE_LOW();
+    DIRECT_MODE_INPUT(baseReg, bitmask);
     interrupts();
   }
 }
@@ -344,7 +294,7 @@ void OneWire::skip()
 void OneWire::depower()
 {
 	noInterrupts();
-	DIRECT_MODE_INPUT();
+	DIRECT_MODE_INPUT(baseReg, bitmask);
 	interrupts();
 }
 
@@ -521,12 +471,49 @@ uint8_t OneWire::search(uint8_t *newAddr)
 // "Understanding and Using Cyclic Redundancy Checks with Maxim iButton Products"
 //
 
+#if ONEWIRE_CRC8_TABLE
+// This table comes from Dallas sample code where it is freely reusable,
+// though Copyright (C) 2000 Dallas Semiconductor Corporation
+static const uint8_t PROGMEM dscrc_table[] = {
+      0, 94,188,226, 97, 63,221,131,194,156,126, 32,163,253, 31, 65,
+    157,195, 33,127,252,162, 64, 30, 95,  1,227,189, 62, 96,130,220,
+     35,125,159,193, 66, 28,254,160,225,191, 93,  3,128,222, 60, 98,
+    190,224,  2, 92,223,129, 99, 61,124, 34,192,158, 29, 67,161,255,
+     70, 24,250,164, 39,121,155,197,132,218, 56,102,229,187, 89,  7,
+    219,133,103, 57,186,228,  6, 88, 25, 71,165,251,120, 38,196,154,
+    101, 59,217,135,  4, 90,184,230,167,249, 27, 69,198,152,122, 36,
+    248,166, 68, 26,153,199, 37,123, 58,100,134,216, 91,  5,231,185,
+    140,210, 48,110,237,179, 81, 15, 78, 16,242,172, 47,113,147,205,
+     17, 79,173,243,112, 46,204,146,211,141,111, 49,178,236, 14, 80,
+    175,241, 19, 77,206,144,114, 44,109, 51,209,143, 12, 82,176,238,
+     50,108,142,208, 83, 13,239,177,240,174, 76, 18,145,207, 45,115,
+    202,148,118, 40,171,245, 23, 73,  8, 86,180,234,105, 55,213,139,
+     87,  9,235,181, 54,104,138,212,149,203, 41,119,244,170, 72, 22,
+    233,183, 85, 11,136,214, 52,106, 43,117,151,201, 74, 20,246,168,
+    116, 42,200,150, 21, 75,169,247,182,232, 10, 84,215,137,107, 53};
 
+//
+// Compute a Dallas Semiconductor 8 bit CRC. These show up in the ROM
+// and the registers.  (note: this might better be done without to
+// table, it would probably be smaller and certainly fast enough
+// compared to all those delayMicrosecond() calls.  But I got
+// confused, so I use this table from the examples.)
+//
+uint8_t OneWire::crc8(const uint8_t *addr, uint8_t len)
+{
+	uint8_t crc = 0;
+
+	while (len--) {
+		crc = pgm_read_byte(dscrc_table + (crc ^ *addr++));
+	}
+	return crc;
+}
+#else
 //
 // Compute a Dallas Semiconductor 8 bit CRC directly.
 // this is much slower, but much smaller, than the lookup table.
 //
-uint8_t OneWire::crc8( uint8_t *addr, uint8_t len)
+uint8_t OneWire::crc8(const uint8_t *addr, uint8_t len)
 {
 	uint8_t crc = 0;
 	
@@ -572,4 +559,6 @@ uint16_t OneWire::crc16(const uint8_t* input, uint16_t len, uint16_t crc)
     }
     return crc;
 }
+#endif
+
 #endif
