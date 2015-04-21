@@ -132,7 +132,7 @@ sample code bearing this copyright.
 
 OneWire::OneWire(uint16_t pin)
 {
-	pinMode(pin, INPUT);
+	pinMode(pin, INPUT_PULLUP);
 	 _pin = pin;
 
 }
