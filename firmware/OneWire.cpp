@@ -124,7 +124,7 @@ sample code bearing this copyright.
 #include "OneWire.h"
 
 
-OneWire::OneWire(uint8_t pin)
+OneWire::OneWire(uint16_t pin)
 {
 	pinMode(pin, INPUT);
 	bitmask = PIN_TO_BITMASK(pin);
@@ -499,7 +499,7 @@ static const uint8_t PROGMEM dscrc_table[] = {
 // compared to all those delayMicrosecond() calls.  But I got
 // confused, so I use this table from the examples.)
 //
-uint8_t OneWire::crc8(const uint8_t *addr, uint8_t len)
+uint8_t OneWire::crc8(uint8_t *addr, uint8_t len)
 {
 	uint8_t crc = 0;
 
